@@ -1,1 +1,51 @@
+name: Build CSSynth 1506 (Windows)
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write   # nötig, damit bei Tags ein Release angelegt werden kann
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Konfigurieren (CMake, Visual Studio 2022, x64)
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCSSYNTH_BUILD_TESTS=ON
+
+      - name: Bauen (Release)
+        run: cmake --build build --config Release --parallel
+
+      - name: DSP-Selbsttest (rendert alle Presets, prüft auf NaN/Stille/Übersteuerung)
+        run: |
+          mkdir test-out
+          build\Release\render_test.exe test-out
+
+      - name: Paket schnüren
+        shell: pwsh
+        run: |
+          $art = "build/CSSynth1506_artefacts/Release"
+          New-Item -ItemType Directory -Force -Path dist/VST3, dist/Standalone | Out-Null
+          Copy-Item "$art/VST3/CSSynth 1506.vst3" -Destination dist/VST3 -Recurse
+          Copy-Item "$art/Standalone/CSSynth 1506.exe" -Destination dist/Standalone
+          Copy-Item packaging/Install_VST3.bat -Destination dist
+          Copy-Item README.md -Destination dist
+          Compress-Archive -Path dist/* -DestinationPath CSSynth-1506-Windows-x64.zip
+
+      - name: Artefakt hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: CSSynth-1506-Windows-x64
+          path: CSSynth-1506-Windows-x64.zip
+
+      - name: Release erstellen (nur bei Tag v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: CSSynth-1506-Windows-x64.zip
 
