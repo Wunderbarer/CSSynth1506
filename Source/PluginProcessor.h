@@ -5,6 +5,7 @@
 #include "Dsp/Engine.h"
 #include "ParamSpec.h"
 #include "Presets.h"
+#include "PresetFile.h"
 
 class CSSynthProcessor : public juce::AudioProcessor
 {
@@ -51,6 +52,14 @@ public:
     int  getLastCc() const            { return lastCc.load(); }
     int  getLastCcValue() const       { return lastCcValue.load(); }
 
+    // --- Anwender-Presets (.cs1506): Import / Export. Nur im Message-Thread aufrufen. ---
+    static juce::File getUserPresetDir();                              // Dokumente/CSSynth/1506 Presets
+    static std::vector<juce::File> scanUserPresets();                  // alle .cs1506 im Preset-Ordner
+    static juce::File importPresetFile (const juce::File& source);     // prüfen + in den Preset-Ordner kopieren
+    bool exportPresetToFile (const juce::File& dest, const juce::String& presetName);
+    bool loadPresetFile (const juce::File& file);                      // false = ungültige Datei
+    juce::String getCurrentUserPreset() const { return currentUserPreset; }
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
     void handleMidiMessage (const juce::MidiMessage&);
@@ -65,6 +74,7 @@ private:
     std::atomic<int> learnIndex { -1 };
     std::atomic<int> lastCc { -1 }, lastCcValue { 0 };
     int currentProgram = 0;
+    juce::String currentUserPreset;   // Dateiname (ohne Endung) des geladenen Anwender-Presets, sonst leer
 
     juce::AudioBuffer<float> scratch;
 

@@ -75,21 +75,34 @@ MainPanel::MainPanel (CSSynthProcessor& p) : proc (p)
     buildLayer (1);
     buildGlobal();
 
-    // Kopfzeile: Preset-Auswahl
-    for (int i = 0; i < proc.getNumPrograms(); ++i)
-        presetBox.addItem (proc.getProgramName (i), i + 1);
-    presetBox.setSelectedItemIndex (proc.getCurrentProgram(), juce::dontSendNotification);
-    presetBox.onChange = [this] { proc.setCurrentProgram (presetBox.getSelectedItemIndex()); };
-    addAndMakeVisible (presetBox);
-
-    prevBtn.onClick = [this]
+    // Kopfzeile: Preset-Auswahl (Werks-Presets: Id 1..N, Anwender-Presets: Id 1000+)
+    presetBox.onChange = [this]
     {
-        const int n = proc.getNumPrograms();
-        proc.setCurrentProgram ((proc.getCurrentProgram() + n - 1) % n);
+        const int id = presetBox.getSelectedId();
+        if (id >= 1000)
+        {
+            const size_t k = (size_t) (id - 1000);
+            if (k < userFiles.size() && ! proc.loadPresetFile (userFiles[k]))
+            {
+                showNotice ("COULD NOT READ PRESET FILE");
+                syncPresetBox();
+            }
+        }
+        else if (id >= 1)
+            proc.setCurrentProgram (id - 1);
     };
-    nextBtn.onClick = [this] { proc.setCurrentProgram ((proc.getCurrentProgram() + 1) % proc.getNumPrograms()); };
+    addAndMakeVisible (presetBox);
+    rebuildPresetBox();
+
+    prevBtn.onClick = [this] { stepPreset (-1); };
+    nextBtn.onClick = [this] { stepPreset (+1); };
     addAndMakeVisible (prevBtn);
     addAndMakeVisible (nextBtn);
+
+    importBtn.onClick = [this] { startImport(); };
+    saveBtn.onClick   = [this] { startSave(); };
+    addAndMakeVisible (importBtn);
+    addAndMakeVisible (saveBtn);
 
     resetMidiBtn.onClick = [this]
     {
@@ -314,21 +327,161 @@ void MainPanel::paint (juce::Graphics& g)
 
 void MainPanel::resized()
 {
-    presetBox.setBounds (842, 30, 250, 30);
-    prevBtn.setBounds (1100, 30, 34, 30);
-    nextBtn.setBounds (1140, 30, 34, 30);
+    presetBox.setBounds (842, 30, 220, 30);
+    prevBtn.setBounds (1068, 30, 34, 30);
+    nextBtn.setBounds (1106, 30, 34, 30);
+    importBtn.setBounds (1150, 30, 70, 30);
+    saveBtn.setBounds (1224, 30, 70, 30);
     resetMidiBtn.setBounds (1150, 664, 140, 24);
+}
+
+//==============================================================================
+// Preset-Auswahl, Import, Export
+void MainPanel::rebuildPresetBox()
+{
+    userFiles = CSSynthProcessor::scanUserPresets();
+
+    presetBox.clear (juce::dontSendNotification);
+    for (int i = 0; i < proc.getNumPrograms(); ++i)
+        presetBox.addItem (proc.getProgramName (i), i + 1);
+
+    if (! userFiles.empty())
+    {
+        presetBox.addSeparator();
+        presetBox.addSectionHeading ("USER PRESETS");
+        for (size_t k = 0; k < userFiles.size(); ++k)
+            presetBox.addItem (userFiles[k].getFileNameWithoutExtension(), 1000 + (int) k);
+    }
+    syncPresetBox();
+}
+
+void MainPanel::syncPresetBox()
+{
+    int want = 0;
+    const auto user = proc.getCurrentUserPreset();
+    if (user.isNotEmpty())
+        for (size_t k = 0; k < userFiles.size(); ++k)
+            if (userFiles[k].getFileNameWithoutExtension() == user) { want = 1000 + (int) k; break; }
+
+    if (want == 0) want = proc.getCurrentProgram() + 1;
+    if (presetBox.getSelectedId() != want)
+        presetBox.setSelectedId (want, juce::dontSendNotification);
+}
+
+void MainPanel::stepPreset (int direction)
+{
+    std::vector<int> ids;
+    for (int i = 0; i < presetBox.getNumItems(); ++i)
+        if (presetBox.getItemId (i) > 0) ids.push_back (presetBox.getItemId (i));
+    if (ids.empty()) return;
+
+    const auto it = std::find (ids.begin(), ids.end(), presetBox.getSelectedId());
+    const int cur = it == ids.end() ? 0 : (int) (it - ids.begin());
+    const int n = (int) ids.size();
+    presetBox.setSelectedId (ids[(size_t) ((cur + direction + n) % n)], juce::sendNotificationSync);
+}
+
+void MainPanel::showNotice (const juce::String& text)
+{
+    notice = text;
+    noticeTicks = 120;   // ca. 6 Sekunden bei 20 Hz
+}
+
+void MainPanel::startImport()
+{
+    chooser = std::make_unique<juce::FileChooser> ("Import CSSynth 1506 presets",
+                                                   juce::File::getSpecialLocation (juce::File::userDocumentsDirectory),
+                                                   "*.cs1506;*.xml");
+    juce::Component::SafePointer<MainPanel> safe (this);
+    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles
+                              | juce::FileBrowserComponent::canSelectMultipleItems,
+                          [safe] (const juce::FileChooser& fc)
+                          {
+                              if (safe != nullptr) safe->importFiles (fc.getResults());
+                          });
+}
+
+void MainPanel::startSave()
+{
+    const auto dir = CSSynthProcessor::getUserPresetDir();
+    dir.createDirectory();
+
+    chooser = std::make_unique<juce::FileChooser> ("Save CSSynth 1506 preset",
+                                                   dir.getChildFile ("My Preset" + juce::String (cs::presetfile::extension())),
+                                                   "*.cs1506");
+    juce::Component::SafePointer<MainPanel> safe (this);
+    chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
+                              | juce::FileBrowserComponent::warnAboutOverwriting,
+                          [safe] (const juce::FileChooser& fc)
+                          {
+                              if (safe == nullptr) return;
+                              auto f = fc.getResult();
+                              if (f == juce::File()) return;           // abgebrochen
+
+                              f = f.withFileExtension (cs::presetfile::extension());
+                              if (safe->proc.exportPresetToFile (f, f.getFileNameWithoutExtension()))
+                              {
+                                  safe->rebuildPresetBox();
+                                  safe->showNotice ("SAVED: " + f.getFileName().toUpperCase());
+                              }
+                              else
+                                  safe->showNotice ("COULD NOT SAVE PRESET");
+                          });
+}
+
+void MainPanel::importFiles (const juce::Array<juce::File>& files)
+{
+    int good = 0, bad = 0;
+    juce::File first;
+
+    for (const auto& f : files)
+    {
+        const auto dest = CSSynthProcessor::importPresetFile (f);
+        if (dest == juce::File()) { ++bad; continue; }
+        ++good;
+        if (first == juce::File()) first = dest;
+    }
+
+    if (first != juce::File())
+        proc.loadPresetFile (first);      // das erste importierte Preset sofort laden
+    rebuildPresetBox();
+
+    if (good == 0 && bad == 0) return;    // Dialog ohne Auswahl geschlossen
+    juce::String msg = "IMPORTED " + juce::String (good) + (good == 1 ? " PRESET" : " PRESETS");
+    if (bad > 0) msg += " | " + juce::String (bad) + " SKIPPED";
+    showNotice (msg);
+}
+
+bool MainPanel::isInterestedInFileDrag (const juce::StringArray& files)
+{
+    for (const auto& f : files)
+    {
+        const auto ext = juce::File (f).getFileExtension().toLowerCase();
+        if (ext == cs::presetfile::extension() || ext == ".xml") return true;
+    }
+    return false;
+}
+
+void MainPanel::filesDropped (const juce::StringArray& files, int, int)
+{
+    juce::Array<juce::File> list;
+    for (const auto& f : files) list.add (juce::File (f));
+    importFiles (list);
 }
 
 void MainPanel::timerCallback()
 {
     for (auto* l : learners) l->refreshLearn();
 
-    if (presetBox.getSelectedItemIndex() != proc.getCurrentProgram())
-        presetBox.setSelectedItemIndex (proc.getCurrentProgram(), juce::dontSendNotification);
+    syncPresetBox();
 
     juce::String t;
-    if (proc.getLearnIndex() >= 0)
+    if (noticeTicks > 0)
+    {
+        --noticeTicks;
+        t = notice;
+    }
+    else if (proc.getLearnIndex() >= 0)
         t = "MIDI LEARN: MOVE A CONTROLLER ...";
     else if (proc.getLastCc() >= 0)
         t = "LAST CC " + juce::String (proc.getLastCc()) + " = " + juce::String (proc.getLastCcValue());

@@ -224,6 +224,7 @@ void CSSynthProcessor::setCurrentProgram (int index)
     const auto& presets = factoryPresets();
     if (! juce::isPositiveAndBelow (index, (int) presets.size())) return;
     currentProgram = index;
+    currentUserPreset = {};
 
     std::array<float, NUM_PARAMS> values;
     for (int i = 0; i < NUM_PARAMS; ++i) values[(size_t) i] = specs()[(size_t) i].def;
@@ -235,6 +236,81 @@ void CSSynthProcessor::setCurrentProgram (int index)
     for (int i = 0; i < NUM_PARAMS; ++i)
         if (auto* p = params[(size_t) i])
             p->setValueNotifyingHost (p->convertTo0to1 (values[(size_t) i]));
+}
+
+//==============================================================================
+// Anwender-Presets
+juce::File CSSynthProcessor::getUserPresetDir()
+{
+    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+               .getChildFile ("CSSynth").getChildFile ("1506 Presets");
+}
+
+std::vector<juce::File> CSSynthProcessor::scanUserPresets()
+{
+    std::vector<juce::File> out;
+    const auto dir = getUserPresetDir();
+    if (! dir.isDirectory()) return out;
+
+    for (const auto& f : dir.findChildFiles (juce::File::findFiles, false, "*" + juce::String (presetfile::extension())))
+        out.push_back (f);
+
+    std::sort (out.begin(), out.end(), [] (const juce::File& a, const juce::File& b)
+               { return a.getFileName().compareNatural (b.getFileName()) < 0; });
+    return out;
+}
+
+juce::File CSSynthProcessor::importPresetFile (const juce::File& source)
+{
+    std::array<float, NUM_PARAMS> values {};
+    juce::String text;
+    if (! presetfile::readFile (source, values, &text))
+        return {};
+
+    const auto dir = getUserPresetDir();
+    if (source.getParentDirectory() == dir)       // liegt schon im Preset-Ordner
+        return source;
+    if (! dir.createDirectory().wasOk())
+        return {};
+
+    auto base = juce::File::createLegalFileName (source.getFileNameWithoutExtension()).trim();
+    if (base.isEmpty()) base = "Preset";
+
+    auto dest = dir.getChildFile (base + presetfile::extension());
+    for (int n = 2; dest.exists() && n < 1000; ++n)   // vorhandene Presets nie überschreiben
+        dest = dir.getChildFile (base + " " + juce::String (n) + presetfile::extension());
+    if (dest.exists()) return {};
+
+    return dest.replaceWithText (text) ? dest : juce::File();
+}
+
+bool CSSynthProcessor::exportPresetToFile (const juce::File& dest, const juce::String& presetName)
+{
+    std::array<float, NUM_PARAMS> values {};
+    for (int i = 0; i < NUM_PARAMS; ++i)
+        if (auto* p = params[(size_t) i])
+            values[(size_t) i] = p->convertFrom0to1 (p->getValue());
+
+    if (! dest.getParentDirectory().createDirectory().wasOk()) return false;
+    if (! dest.replaceWithText (presetfile::toXml (values, presetName))) return false;
+
+    if (dest.getParentDirectory() == getUserPresetDir())
+        currentUserPreset = dest.getFileNameWithoutExtension();
+    return true;
+}
+
+bool CSSynthProcessor::loadPresetFile (const juce::File& file)
+{
+    std::array<float, NUM_PARAMS> values {};
+    if (! presetfile::readFile (file, values))
+        return false;
+
+    for (int i = 0; i < NUM_PARAMS; ++i)
+        if (auto* p = params[(size_t) i])
+            p->setValueNotifyingHost (p->convertTo0to1 (values[(size_t) i]));
+
+    currentUserPreset = file.getFileNameWithoutExtension();
+    return true;
 }
 
 //==============================================================================
@@ -254,6 +330,7 @@ void CSSynthProcessor::getStateInformation (juce::MemoryBlock& dest)
     }
     state.appendChild (map, nullptr);
     state.setProperty ("program", currentProgram, nullptr);
+    state.setProperty ("userPreset", currentUserPreset, nullptr);
 
     if (auto xml = state.createXml())
         copyXmlToBinary (*xml, dest);
@@ -279,6 +356,7 @@ void CSSynthProcessor::setStateInformation (const void* data, int size)
         tree.removeChild (map, nullptr);
     }
     currentProgram = juce::jlimit (0, getNumPrograms() - 1, (int) tree.getProperty ("program", 0));
+    currentUserPreset = tree.getProperty ("userPreset").toString();
     apvts.replaceState (tree);
 }
 
