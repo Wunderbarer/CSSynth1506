@@ -1,17 +1,12 @@
 name: Build CSSynth 1506 (Windows)
 
-on:
-  push:
-    branches: [ main, master ]
-    tags: [ 'v*' ]
-  pull_request:
-  workflow_dispatch:
+on: [push, pull_request, workflow_dispatch]
 
 jobs:
   windows:
     runs-on: windows-latest
     permissions:
-      contents: write   # nötig, damit bei Tags ein Release angelegt werden kann
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -21,12 +16,12 @@ jobs:
       - name: Bauen (Release)
         run: cmake --build build --config Release --parallel
 
-      - name: DSP-Selbsttest (rendert alle Presets, prüft auf NaN/Stille/Übersteuerung)
+      - name: DSP-Selbsttest
         run: |
           mkdir test-out
           build\Release\render_test.exe test-out
 
-      - name: Paket schnüren
+      - name: Paket schnuren
         shell: pwsh
         run: |
           $art = "build/CSSynth1506_artefacts/Release"
@@ -48,4 +43,3 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: CSSynth-1506-Windows-x64.zip
-
