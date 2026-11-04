@@ -10,16 +10,48 @@ CSSynth                                                   Model 1506
 
 ## Klang
 
-* **8 Stimmen**, zwei unabhängige **Layer** (I und II) wie beim CS-80, jeder mit:
+* **16 Stimmen**, vier unabhängige **Layer** (I – IV; im Fenster per Taster „LAYER I + II“ / „LAYER III + IV“
+  umschaltbar), jeder mit:
   * Oszillator: Saw / Square / Pulse (mit PWM), Oktavlage 32' – 2', Detune, Sub-Oszillator, Rauschen
   * Filter: Hochpass + Tiefpass (Resonanz), **Brilliance**, Key-Tracking, Filter-Hüllkurve
     (IL – A – AL – D – SL – R wie beim Original)
   * Verstärker-Hüllkurve (ADSR) und Layer-Level
+  * **Layer IV ist ein Formant-Oszillator:** Vokal A / E / I / O / U oder stufenlos **Morph** (Regler MORPH),
+    Formant-Verschiebung (F.SHIFT, ±12 Halbtöne) und BREATH (Hauch-Rauschen). Der LFO kann den Vokal
+    über **LFO > VOWEL** (Bereich MODULATION) bewegen – für sprechende Klänge.
 * **LFO** (Sinus, Dreieck, Saw, Sample&Hold) auf Tonhöhe, Filter und Pulsbreite
 * Spielhilfen: Pitchbend (Bereich einstellbar), Modulationsrad (CC 1), **Aftertouch** → Filter und Vibrato,
   Anschlagdynamik → Lautstärke / Filter, Glide (Portamento), Sustain-Pedal
 * **Effekte:** Chorus, Delay (mit Ping-Pong) und Reverb
-* 8 Werks-Presets (Blade Brass, Warm Strings, Glass Pad, Sub Bass, Ribbon Lead, Brass Stab, Wind Swell, Init)
+* **39 Werks-Presets** (Dropdown oben im Fenster, Pfeiltasten daneben zum Durchschalten):
+  * Brass: Blade Brass, Brass Stab, Fanfare Brass, Soft Horns, Synth Trumpet, Big Brass Section
+  * Strings: Warm Strings, Slow Strings, Ensemble 80, Cello Layer
+  * Pads: Glass Pad, Choir Pad, Dark Pad, Aurora Pad, Analog Air, Wind Swell
+  * Bass: Sub Bass, Fat Bass, Rubber Bass, Pulse Bass, Deep Sub
+  * Leads: Ribbon Lead, Solo Cry, Pulse Lead, Smooth Lead
+  * Keys: Electric Pluck, Glass Keys, Clav Stab
+  * FX: Sweep FX, Wobble Pad, Space Drone, Noise Rise
+  * Formant / 4 Layer: Choir Ahh, Vowel Sweep, Talking Lead, Whisper Oh, Deep Voice Bass, Four Layer Stack
+  * Init (Grundeinstellung)
+
+## Presets importieren, speichern, weitergeben
+
+Eigene und fremde Klänge liegen als kleine Textdateien mit der Endung **`.cs1506`** vor
+(XML, mit jedem Texteditor lesbar). Die Bedienung sitzt oben rechts im Fenster:
+
+* **IMPORT** – Dateiauswahl, auch mehrere Dateien gleichzeitig. Das erste Preset wird sofort geladen.
+* **SAVE** – speichert den aktuellen Klang als `.cs1506` (Vorschlag: der Preset-Ordner, siehe unten).
+* **Drag & Drop** – Preset-Dateien einfach ins Plugin-Fenster ziehen (je nach Host; im Standalone immer).
+* Importierte und gespeicherte Presets erscheinen im Dropdown unter **USER PRESETS**; die Pfeiltasten
+  blättern durch alle Presets (Werks- und Anwender-Presets).
+
+Der Preset-Ordner ist `Dokumente\CSSynth\1506 Presets`. Dateien, die du dort von Hand hineinlegst,
+erscheinen beim nächsten Öffnen des Plugin-Fensters. Beim Import wird nie etwas überschrieben:
+gibt es den Namen schon, wird „Name 2“ angelegt. Ungültige Dateien werden übersprungen, Werte außerhalb
+des erlaubten Bereichs automatisch begrenzt.
+
+Die Werks-Presets liegen zusätzlich als Dateien im Paket `CSSynth-1506-Presets.zip` bei, als Vorlage und
+zum Ausprobieren des Imports.
 
 ## Bauen lassen über GitHub (empfohlen – nichts muss lokal installiert werden)
 
@@ -57,9 +89,9 @@ Es gibt zwei Wege, die auch kombinierbar sind.
 
 ### A) Eingebautes MIDI-Learn (funktioniert in FL Studio und im Standalone)
 
-1. **Rechtsklick** auf einen Drehregler, Fader oder Schalter → **MIDI Learn**. Das Element zeigt nun den Learn-Zustand an.
-2. Am Oxygen den gewünschten Regler/Fader bewegen. Die Zuordnung ist sofort aktiv; am Element
-   steht danach „CC##“.
+1. **Rechtsklick** auf einen Drehregler, Fader oder Schalter → **MIDI Learn**. Das Element wird orange umrandet.
+2. Am Oxygen den gewünschten Regler/Fader bewegen. Die Zuordnung ist sofort aktiv (die zuletzt
+   empfangene CC-Nummer steht unten rechts in der Fußzeile).
 3. Die Zuordnungen werden **im Projekt bzw. Preset-Zustand gespeichert**.
    „RESET MIDI MAP“ stellt die Standardbelegung wieder her.
 
@@ -101,6 +133,7 @@ Mit `-DCSSYNTH_BUILD_TESTS=ON` entsteht zusätzlich `render_test.exe` (Offline-T
 | `Source/Dsp/Engine.*`, `Effects.h` | Stimmen, Filter, Hüllkurven, LFO, Chorus/Delay/Reverb |
 | `Source/ParamSpec.h` | Parameter-Tabelle (Namen, Bereiche, Standardwerte) |
 | `Source/Presets.h` | Werks-Presets |
+| `Source/PresetFile.h` | Dateiformat `.cs1506` (Import/Export) |
 | `Source/PluginProcessor.*` | VST3/Standalone-Anbindung, MIDI, MIDI-Learn, Zustand speichern |
 | `Source/PluginEditor.*`, `Look.h` | Vintage-Oberfläche (Drehregler, Fader, LED-Taster) |
 | `tests/render_test.cpp` | Offline-DSP-Test |
