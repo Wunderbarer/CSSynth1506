@@ -1,12 +1,19 @@
-# CSSynth 1506
+# Diplomat 1506 (Projekt „CSSynth 1506“)
 
 Polyphoner Software-Synthesizer im Stil der großen Vintage-Synthesizer der späten 70er/80er
 (Vorbild: Yamaha CS-80) – als **VST3-Plugin** (z. B. für FL Studio unter Windows 11) und als
 **Standalone-Programm**.
 
 ```
-CSSynth                                                   Model 1506
+DIPLOMAT                                                  Model 1506
 ```
+
+Die Oberfläche hat ein **Cyberpunk-Design**: dunkles Gehäuse mit Neonfarben (Cyan, Magenta, Violett).
+Drehregler und Fader leuchten **heller und kräftiger, je höher der Wert steht** (von dunklem Violett über
+Cyan bis fast Weiß; LEVEL-Fader und Master-Regler in Magenta). Schriftarten: Orbitron (Name), Audiowide
+(Modellnummer) und Rajdhani (Beschriftungen) – eingebettet, Lizenz siehe `Resources/Fonts/OFL-Licenses.txt`.
+Plugin-Name, Dateiendung `.cs1506` und Preset-Ordner bleiben unverändert, damit bestehende Projekte und
+Presets weiter funktionieren.
 
 ## Klang
 
@@ -89,7 +96,7 @@ Es gibt zwei Wege, die auch kombinierbar sind.
 
 ### A) Eingebautes MIDI-Learn (funktioniert in FL Studio und im Standalone)
 
-1. **Rechtsklick** auf einen Drehregler, Fader oder Schalter → **MIDI Learn**. Das Element wird orange umrandet.
+1. **Rechtsklick** auf einen Drehregler, Fader oder Schalter → **MIDI Learn**. Das Element wird gelb umrandet.
 2. Am Oxygen den gewünschten Regler/Fader bewegen. Die Zuordnung ist sofort aktiv (die zuletzt
    empfangene CC-Nummer steht unten rechts in der Fußzeile).
 3. Die Zuordnungen werden **im Projekt bzw. Preset-Zustand gespeichert**.
@@ -135,7 +142,7 @@ Mit `-DCSSYNTH_BUILD_TESTS=ON` entsteht zusätzlich `render_test.exe` (Offline-T
 | `Source/Presets.h` | Werks-Presets |
 | `Source/PresetFile.h` | Dateiformat `.cs1506` (Import/Export) |
 | `Source/PluginProcessor.*` | VST3/Standalone-Anbindung, MIDI, MIDI-Learn, Zustand speichern |
-| `Source/PluginEditor.*`, `Look.h` | Vintage-Oberfläche (Drehregler, Fader, LED-Taster) |
+| `Source/PluginEditor.*`, `Look.h` | Cyberpunk-Oberfläche (Neon-Drehregler, Fader, Leuchttaster) |
 | `tests/render_test.cpp` | Offline-DSP-Test |
 | `.github/workflows/build.yml` | Automatischer Windows-Build |
 
