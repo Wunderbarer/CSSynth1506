@@ -3,6 +3,12 @@ cmake_minimum_required(VERSION 3.22)
 # Laufzeitbibliothek statisch einbinden: das Plugin läuft damit ohne installierte VC++-Redistributables.
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "" FORCE)
 
+# macOS: Universal-Binary (Apple Silicon + Intel), ab macOS 11. Muss vor project() gesetzt werden.
+if(APPLE)
+    set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "")
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "")
+endif()
+
 project(CSSynth1506 VERSION 1.0.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -20,14 +26,22 @@ FetchContent_Declare(
     GIT_SHALLOW    TRUE)
 FetchContent_MakeAvailable(JUCE)
 
+# Plugin-Formate: Windows VST3 + Standalone; macOS zusätzlich Audio Unit (AU)
+if(APPLE)
+    set(CSSYNTH_FORMATS VST3 AU Standalone)
+else()
+    set(CSSYNTH_FORMATS VST3 Standalone)
+endif()
+
 juce_add_plugin(CSSynth1506
     COMPANY_NAME                "CSSynth"
     PRODUCT_NAME                "CSSynth 1506"
     BUNDLE_ID                   "com.cssynth.model1506"
     PLUGIN_MANUFACTURER_CODE    Csyn
     PLUGIN_CODE                 C506
-    FORMATS                     VST3 Standalone
+    FORMATS                     ${CSSYNTH_FORMATS}
     VST3_CATEGORIES             Instrument Synth
+    AU_MAIN_TYPE                kAudioUnitType_MusicDevice
     IS_SYNTH                    TRUE
     NEEDS_MIDI_INPUT            TRUE
     NEEDS_MIDI_OUTPUT           FALSE

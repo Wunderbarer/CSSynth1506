@@ -74,6 +74,16 @@ zum Ausprobieren des Imports.
 Der Workflow baut außerdem den Offline-DSP-Test und rendert alle Presets; er bricht ab,
 wenn dabei NaN-Werte, Stille oder Übersteuerung auftreten.
 
+## Installation unter macOS
+
+Der Workflow baut zusätzlich eine **macOS-Version** (Universal: Apple Silicon und Intel, ab macOS 11) mit
+**VST3, Audio Unit (AU) und Standalone-App**. Unter *Actions* den Lauf öffnen und das Artefakt
+`CSSynth-1506-macOS-Universal` herunterladen, entpacken und `Install_macOS.command` starten
+(Rechtsklick → *Öffnen*). Es kopiert VST3 nach `~/Library/Audio/Plug-Ins/VST3` und AU nach
+`~/Library/Audio/Plug-Ins/Components` und entfernt die Quarantäne-Markierung. Die Dateien sind nur
+ad-hoc signiert, nicht notarisiert; ohne das Skript zeigt macOS eine Sicherheitswarnung. Die
+Standalone-App beim ersten Start per Rechtsklick → *Öffnen* starten.
+
 ## Installation unter Windows 11
 
 Das ZIP enthält `VST3\CSSynth 1506.vst3`, `Standalone\CSSynth 1506.exe` und `Install_VST3.bat`.
@@ -144,7 +154,7 @@ Mit `-DCSSYNTH_BUILD_TESTS=ON` entsteht zusätzlich `render_test.exe` (Offline-T
 | `Source/PluginProcessor.*` | VST3/Standalone-Anbindung, MIDI, MIDI-Learn, Zustand speichern |
 | `Source/PluginEditor.*`, `Look.h` | Cyberpunk-Oberfläche (Neon-Drehregler, Fader, Leuchttaster) |
 | `tests/render_test.cpp` | Offline-DSP-Test |
-| `.github/workflows/build.yml` | Automatischer Windows-Build |
+| `.github/workflows/build.yml` | Automatischer Build (Windows und macOS) |
 
 ## Lizenzhinweis
 
