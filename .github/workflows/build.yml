@@ -1,4 +1,4 @@
-name: Build CSSynth 1506 (Windows)
+name: Build CSSynth 1506 (Windows + macOS)
 
 on: [push, pull_request, workflow_dispatch]
 
@@ -6,7 +6,7 @@ jobs:
   windows:
     runs-on: windows-2022
     permissions:
-      contents: write
+      contents: write   # nötig, damit bei Tags ein Release angelegt werden kann
     steps:
       - uses: actions/checkout@v4
 
@@ -16,12 +16,12 @@ jobs:
       - name: Bauen (Release)
         run: cmake --build build --config Release --parallel
 
-      - name: DSP-Selbsttest
+      - name: DSP-Selbsttest (rendert alle Presets, prüft auf NaN/Stille/Übersteuerung)
         run: |
           mkdir test-out
           build\Release\render_test.exe test-out
 
-      - name: Paket schnuren
+      - name: Paket schnüren
         shell: pwsh
         run: |
           $art = "build/CSSynth1506_artefacts/Release"
@@ -43,3 +43,49 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: CSSynth-1506-Windows-x64.zip
+
+  macos:
+    runs-on: macos-14
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Konfigurieren (CMake, Universal-Binary arm64 + x86_64)
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCSSYNTH_BUILD_TESTS=ON
+
+      - name: Bauen (Release)
+        run: cmake --build build --config Release --parallel 4
+
+      - name: DSP-Selbsttest (rendert alle Presets, prüft auf NaN/Stille/Übersteuerung)
+        run: |
+          mkdir test-out
+          build/render_test test-out
+
+      - name: Paket schnüren (ad-hoc signiert)
+        run: |
+          art=build/CSSynth1506_artefacts/Release
+          [ -d "$art" ] || art=build/CSSynth1506_artefacts
+          mkdir -p dist/VST3 dist/AU dist/Standalone
+          cp -R "$art/VST3/CSSynth 1506.vst3" dist/VST3/
+          cp -R "$art/AU/CSSynth 1506.component" dist/AU/
+          cp -R "$art/Standalone/CSSynth 1506.app" dist/Standalone/
+          for b in "dist/VST3/CSSynth 1506.vst3" "dist/AU/CSSynth 1506.component" "dist/Standalone/CSSynth 1506.app"; do
+            codesign --force --deep --sign - "$b"
+          done
+          cp packaging/Install_macOS.command dist/
+          chmod +x dist/Install_macOS.command
+          cp README.md dist/
+          cd dist && zip -qry ../CSSynth-1506-macOS-Universal.zip . && cd ..
+
+      - name: Artefakt hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: CSSynth-1506-macOS-Universal
+          path: CSSynth-1506-macOS-Universal.zip
+
+      - name: Release-Datei anhängen (nur bei Tag v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: CSSynth-1506-macOS-Universal.zip
