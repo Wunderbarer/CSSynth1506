@@ -62,7 +62,7 @@ jobs:
           mkdir test-out
           build/render_test test-out
 
-            - name: Paket schnüren (ad-hoc signiert)
+      - name: Paket schnüren (ad-hoc signiert)
         run: |
           echo "--- gebaute Plugin-Pakete ---"
           find build -maxdepth 6 \( -name "*.vst3" -o -name "*.component" -o -name "*.app" \) -not -path "*/CMakeFiles/*" -print
