@@ -62,14 +62,19 @@ jobs:
           mkdir test-out
           build/render_test test-out
 
-      - name: Paket schnüren (ad-hoc signiert)
+            - name: Paket schnüren (ad-hoc signiert)
         run: |
-          art=build/CSSynth1506_artefacts/Release
-          [ -d "$art" ] || art=build/CSSynth1506_artefacts
+          echo "--- gebaute Plugin-Pakete ---"
+          find build -maxdepth 6 \( -name "*.vst3" -o -name "*.component" -o -name "*.app" \) -not -path "*/CMakeFiles/*" -print
+          VST3=$(find build -maxdepth 6 -name "CSSynth 1506.vst3" -not -path "*/CMakeFiles/*" | head -n 1)
+          AU=$(find build -maxdepth 6 -name "CSSynth 1506.component" -not -path "*/CMakeFiles/*" | head -n 1)
+          APP=$(find build -maxdepth 6 -name "CSSynth 1506.app" -not -path "*/CMakeFiles/*" | head -n 1)
+          echo "VST3=$VST3"; echo "AU=$AU"; echo "APP=$APP"
+          test -n "$VST3" && test -n "$AU" && test -n "$APP"
           mkdir -p dist/VST3 dist/AU dist/Standalone
-          cp -R "$art/VST3/CSSynth 1506.vst3" dist/VST3/
-          cp -R "$art/AU/CSSynth 1506.component" dist/AU/
-          cp -R "$art/Standalone/CSSynth 1506.app" dist/Standalone/
+          cp -R "$VST3" dist/VST3/
+          cp -R "$AU" dist/AU/
+          cp -R "$APP" dist/Standalone/
           for b in "dist/VST3/CSSynth 1506.vst3" "dist/AU/CSSynth 1506.component" "dist/Standalone/CSSynth 1506.app"; do
             codesign --force --deep --sign - "$b"
           done
