@@ -35,6 +35,14 @@ juce_add_plugin(CSSynth1506
     EDITOR_WANTS_KEYBOARD_FOCUS FALSE
     COPY_PLUGIN_AFTER_BUILD     ${CSSYNTH_COPY_PLUGIN})
 
+# Schriftarten (SIL Open Font License, siehe Resources/Fonts/OFL-Licenses.txt) in die Binärdatei einbetten
+juce_add_binary_data(CSSynthFonts SOURCES
+    Resources/Fonts/FontTitle.ttf
+    Resources/Fonts/FontModel.ttf
+    Resources/Fonts/FontLabel.ttf
+    Resources/Fonts/FontLabelBold.ttf)
+set_target_properties(CSSynthFonts PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 target_sources(CSSynth1506 PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
@@ -52,6 +60,7 @@ endif()
 
 target_link_libraries(CSSynth1506
     PRIVATE
+        CSSynthFonts
         juce::juce_audio_utils
         juce::juce_audio_processors
         juce::juce_gui_basics
