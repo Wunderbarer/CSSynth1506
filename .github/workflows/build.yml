@@ -46,7 +46,7 @@ jobs:
           files: CSSynth-1506-Windows-x64.zip
 
   macos:
-    runs-on: macos-14
+    runs-on: macos-15
     permissions:
       contents: write
     steps:
