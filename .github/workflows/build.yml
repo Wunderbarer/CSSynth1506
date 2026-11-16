@@ -20,6 +20,7 @@ jobs:
         run: |
           mkdir test-out
           build\Release\render_test.exe test-out
+          build\Release\sample_test.exe
 
       - name: Paket schnüren
         shell: pwsh
@@ -61,6 +62,7 @@ jobs:
         run: |
           mkdir test-out
           build/render_test test-out
+          build/sample_test
 
       - name: Paket schnüren (ad-hoc signiert)
         run: |
