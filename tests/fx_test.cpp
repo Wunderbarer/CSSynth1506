@@ -2,6 +2,7 @@
 // Mix 0 = unverändert, Effekt wirkt hörbar, kein NaN, begrenzter Pegel, stabil bei Extremwerten, Spektrum.
 //   fx_test
 #include "../Source/Dsp/Engine.h"
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <vector>
@@ -99,7 +100,7 @@ static void fft (std::vector<std::complex<double>>& a)
 static std::vector<double> waveSpectrum (int wave, int note, double& f0)
 {
     const int sr = 44100, N = 32768;
-    Engine e; e.prepare (sr);
+    Engine e; e.prepare (sr); e.setDriftAmount (0.f);
     Params p;
     for (int i = 0; i < NUM_PARAMS; ++i) p.v[(size_t) i] = specs()[(size_t) i].def;
     for (int L = 0; L < NUM_LAYERS; ++L) p.v[(size_t) (L * LP_COUNT + LP_LEVEL)] = 0.f;
@@ -282,6 +283,92 @@ int main()
         for (double v : tri)  rmsT += v;
         for (double v : sq)   rmsQ += v;
         check (rmsS > 0.1 * rmsQ && rmsS < 2.0 * rmsQ && rmsT > 0.1 * rmsQ && rmsT < 2.0 * rmsQ, "Pegel von Sinus/Dreieck liegt im Rahmen von Square", rmsS / rmsQ, rmsT / rmsQ);
+    }
+
+    // 9) Qualitäts-Update: Stereo, Drift, Loop-Überblendung, Distortion-Oversampling, Reverb
+    {
+        auto stereoDiff = [] (int note, bool layers2)
+        {
+            Engine e; e.prepare (48000);
+            Params p; for (int i = 0; i < NUM_PARAMS; ++i) p.v[(size_t) i] = specs()[(size_t) i].def;
+            p.v[GP_CH_MIX] = 0.f; p.v[GP_RV_MIX] = 0.f; p.v[GP_DL_MIX] = 0.f;
+            p.v[LP_LEVEL] = 0.8f; p.v[LP_AS] = 1.f;
+            if (layers2) { p.v[LP_COUNT + LP_LEVEL] = 0.8f; p.v[LP_COUNT + LP_AS] = 1.f; p.v[2 * LP_COUNT + LP_LEVEL] = 0.8f; p.v[2 * LP_COUNT + LP_AS] = 1.f; }
+            e.setParams (p); e.noteOn (note, 0.8f);
+            std::vector<float> l (48000), r (48000);
+            for (int i = 0; i < 48000; i += 480) e.process (l.data() + i, r.data() + i, 480);
+            double d = 0, m = 0; for (int i = 24000; i < 48000; ++i) { d += std::fabs (l[(size_t) i] - r[(size_t) i]); m += std::fabs (l[(size_t) i]) + std::fabs (r[(size_t) i]); }
+            return d / m;
+        };
+        check (stereoDiff (36, true) < 1e-3, "Stereo: tiefe Töne (C2) bleiben mono", stereoDiff (36, true));
+        check (stereoDiff (72, true) > 0.05, "Stereo: mehrere Layer in hoher Lage haben Breite", stereoDiff (72, true));
+        check (stereoDiff (72, false) < 0.05, "Stereo: einzelner Layer bleibt fast mittig", stereoDiff (72, false));
+
+        // Drift: Sinus A4 -> Frequenzabweichung bleibt klein (< 8 Cent), ist aber vorhanden
+        {
+            Engine e; e.prepare (48000);
+            Params p; for (int i = 0; i < NUM_PARAMS; ++i) p.v[(size_t) i] = specs()[(size_t) i].def;
+            p.v[GP_CH_MIX] = 0.f; p.v[GP_RV_MIX] = 0.f; p.v[GP_DL_MIX] = 0.f; p.v[LP_WAVE] = 3; p.v[LP_LEVEL] = 0.8f; p.v[LP_AS] = 1.f; p.v[LP_LPF] = 18000.f;
+            e.setParams (p); e.noteOn (69, 0.8f);
+            const int N = 48000 * 12; std::vector<float> l ((size_t) N), r ((size_t) N);
+            for (int i = 0; i < N; i += 480) e.process (l.data() + i, r.data() + i, 480);
+            // Frequenz aus Nulldurchgängen pro Sekunde
+            double lo = 1e9, hi = -1e9;
+            for (int sec = 1; sec < 12; ++sec)
+            {
+                int z = 0; for (int i = sec * 48000; i < (sec + 1) * 48000 - 1; ++i) if (l[(size_t) i] <= 0.f && l[(size_t) i + 1] > 0.f) ++z;
+                const double cents = 1200.0 * std::log2 ((double) z / 440.0); lo = std::min (lo, cents); hi = std::max (hi, cents);
+            }
+            check (hi - lo < 16.0, "Drift: Schwankung bleibt klein (Cent, Spanne)", hi - lo, 16.0);
+        }
+
+        // Sample-Loop: kein Knacken an der Loop-Grenze (Sinus, Loop passt nicht ganzzahlig)
+        {
+            SampleData sd; sd.rate = 32000; sd.data.resize (8000);
+            for (size_t i = 0; i < sd.data.size(); ++i) sd.data[i] = 0.8f * std::sin (2.0 * 3.14159265358979 * 441.3 * (double) i / 32000.0);
+            Engine e; e.prepare (48000); e.setSample (&sd);
+            Params p; for (int i = 0; i < NUM_PARAMS; ++i) p.v[(size_t) i] = specs()[(size_t) i].def;
+            for (int L = 0; L < 5; ++L) p.v[L * LP_COUNT + LP_LEVEL] = 0.f;
+            const int o = 4 * LP_COUNT; p.v[o + LP_LEVEL] = 1.f; p.v[o + LP_WAVE] = 0; p.v[o + LP_LPF] = 18000.f; p.v[o + LP_AS] = 1.f;
+            p.v[GP_SMP_ROOT] = 69; p.v[GP_SMP_LSTART] = 0.1f; p.v[GP_SMP_LEND] = 0.9f; p.v[GP_RV_MIX] = 0; p.v[GP_CH_MIX] = 0; p.v[GP_DL_MIX] = 0;
+            e.setParams (p); e.noteOn (69, 1.f);
+            const int N = 96000; std::vector<float> l ((size_t) N), r ((size_t) N);
+            for (int i = 0; i < N; i += 480) e.process (l.data() + i, r.data() + i, 480);
+            std::vector<double> d; for (int i = 24000; i < N - 1; ++i) d.push_back (std::fabs ((double) l[(size_t) i + 1] - l[(size_t) i]));
+            double mx = 0; for (double v : d) mx = std::max (mx, v);
+            std::sort (d.begin(), d.end());
+            check (mx < 3.0 * d[d.size() / 2], "Sample-Loop: kein Knacken an der Loop-Grenze (max/median Schritt)", mx / d[d.size() / 2], 3.0);
+        }
+
+        // Distortion: Alias-Anteil (Sinus 3,1 kHz, Soft, Drive voll) deutlich unter -35 dB
+        {
+            Distortion dd; dd.prepare (48000);
+            const int N = 48000; std::vector<float> y ((size_t) N);
+            for (int i = 0; i < N; ++i) { float l = 0.7f * (float) std::sin (2.0 * 3.14159265358979 * 3100.0 * i / 48000.0), r = l; dd.process (l, r, 0, 1.f, 1.f, 1.f); y[(size_t) i] = l; }
+            const int n = 16384, a = 8192; double tot = 0, har = 0;
+            for (int k = 1; k < n / 2; ++k)
+            {
+                const double f = k * 48000.0 / n; double re = 0, im = 0;
+                for (int i = 0; i < n; ++i) { const double w = 0.5 - 0.5 * std::cos (2 * 3.14159265358979 * i / n), ph = -2 * 3.14159265358979 * f * i / 48000.0; re += y[(size_t) (a + i)] * w * std::cos (ph); im += y[(size_t) (a + i)] * w * std::sin (ph); }
+                const double pw2 = re * re + im * im; tot += pw2; const double h = f / 3100.0; if (std::fabs (h - std::round (h)) < 0.012) har += pw2;
+            }
+            check (10 * std::log10 ((tot - har) / tot) < -35.0, "Distortion: Alias-Anteil unter -35 dB (4x-Oversampling)", 10 * std::log10 ((tot - har) / tot), -35.0);
+        }
+
+        // Reverb: stabil, klingt aus (Impuls, SIZE 1.0), Stereo-Ausgang dekorreliert
+        {
+            Reverb rv; rv.prepare (48000);
+            double eEarly = 0, eLate = 0, corr = 0, el = 0, er = 0; bool ok = true;
+            for (int i = 0; i < 48000 * 30; ++i)
+            {
+                float l = i == 0 ? 1.f : 0.f, r = l; rv.process (l, r, 1.f, 0.5f, 1.f);
+                if (! std::isfinite (l) || ! std::isfinite (r)) ok = false;
+                if (i > 4800 && i < 48000 * 2) { eEarly += (double) l * l; corr += (double) l * r; el += (double) l * l; er += (double) r * r; }
+                if (i > 48000 * 28) eLate += (double) l * l;
+            }
+            check (ok && eLate < eEarly * 1e-6, "Reverb: SIZE 1.0 klingt aus (kein Aufschaukeln)", eLate / std::max (eEarly, 1e-30), 1e-6);
+            check (std::fabs (corr / std::sqrt (el * er)) < 0.5, "Reverb: Stereo-Kanäle sind dekorreliert", std::fabs (corr / std::sqrt (el * er)), 0.5);
+        }
     }
 
     std::printf (failures ? "\n%d Test(s) FEHLGESCHLAGEN\n" : "\nALLE FX-TESTS BESTANDEN\n", failures);

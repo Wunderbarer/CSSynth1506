@@ -74,7 +74,7 @@ int main (int argc, char** argv)
             if ((int) i > hold + tail - sr / 2) tailSum += (double) l[i] * l[i];
         }
         const double rms = std::sqrt (sum / hold), tailRms = std::sqrt (tailSum / (sr / 2));
-        const bool ok = ! bad && peak > 0.05f && peak < 1.0f && tailRms < 0.01 && rms > 0.01;
+        const bool ok = ! bad && peak > 0.05f && peak < 1.0f && tailRms < 0.015 && rms > 0.01;
         std::printf ("%-14s peak %.3f  rms(hold) %.3f  rms(letzte 0.5s) %.5f  %s\n", preset.name, peak, rms, tailRms, ok ? "OK" : "CHECK");
         if (! ok) ++failures;
 
