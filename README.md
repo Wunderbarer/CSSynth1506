@@ -249,3 +249,15 @@ Seite **RHYTHM** (Schalter oben neben den Layer-Seiten): 16 Schritte (-1 bis +1)
 * **START**: *Free* = das Muster beginnt mit der ersten gespielten Taste bei Schritt 1; *Host bar* = das Muster
   rastet auf die Taktposition der DAW ein (nur bei laufender Wiedergabe, sonst automatisch *Free*).
 * Der gelb umrandete Schritt zeigt die aktuelle Position.
+
+## Klangqualität (ohne zusätzliche Regler)
+
+* **Stereo an der Quelle:** Layer I bleibt in der Mitte, die übrigen Layer sitzen fest leicht links/rechts, dazu eine kleine
+  tonhöhenabhängige Streuung. Tiefe Töne (unter C2) bleiben mono, nach oben öffnet sich das Bild. Einzelne Layer klingen unverändert.
+* **Analoge Drift:** Jeder Layer jeder Stimme driftet sehr langsam um wenige Cent und wenige Prozent in der Filterfrequenz.
+  Gleich gestimmte Layer laufen dadurch nicht mehr phasenstarr. (Sample-Loops mit TEMPO-SYNC sind ausgenommen.)
+* **Sample-Layer:** kurze Überblendung (1,5 ms) am Loop-Ende und Ausblenden am Ende von One-Shots - kein Knacken mehr.
+* **Reverb:** neues 8-Kanal-FDN mit modulierten Verzögerungen und Eingangs-Diffusion (SIZE/DAMP/MIX wie bisher, Nachhallzeit
+  und Pegel an den früheren Hall angeglichen). Weicher, dichter, weniger metallisch, mit breitem Stereobild.
+* **Distortion:** echtes 4-faches Oversampling (Halbband-Filter); Aliasing bei Soft/Hard um 13-17 dB geringer.
+  Das trockene Signal wird um die Filterlaufzeit (26 Samples) verzögert, damit bei Mix < 100 % keine Kammfilter entstehen.
