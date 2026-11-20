@@ -109,6 +109,7 @@ public:
     void allSoundOff();
     void setTempo (double bpm) { tempoBpm = bpm > 20.0 && bpm < 400.0 ? bpm : 120.0; }
     void setHostPosition (double ppq, bool valid) { hostPpq = ppq; hostPpqValid = valid; }   // Taktposition in Vierteln (nur bei laufendem Host gültig)
+    void setDriftAmount (float a) { driftAmt = a; }   // 1 = Standard (analoge Drift an); 0 nur für Messungen/Tests
     int getSeqStep() const { return seqStepShown.load (std::memory_order_relaxed); }   // -1 = Rhythm-Seq aus
     bool hasActiveVoices() const { for (const auto& v : voices) if (v.active) return true; return false; }
 
@@ -127,6 +128,7 @@ private:
     {
         float ph = 0.f, subPh = 0.f, tone = 0.f;
         float sph = 0.f, dStep = 0.f;   // Osc-Sync: Slave-Phase, Sprunghöhe beim letzten Reset
+        float dr1 = 0.f, dr2 = 0.f;     // analoge Drift: langsame Zufallswerte für Tonhöhe und Filter
         Svf hp, lp;
         Svf fm[3];            // Formant-Resonatoren (nur Layer IV)
         double sp = 0.0;      // Abspielposition im Sample (nur Layer V)
@@ -145,7 +147,7 @@ private:
     Voice* allocate();
     void releaseVoice (Voice& v);
     void renderChunk (float* l, float* r, int n);
-    void renderVoice (Voice& v, float* mono, int n);
+    void renderVoice (Voice& v, float* monoL, float* monoR, int n);
     float noise();
 
     Params P;
@@ -162,6 +164,7 @@ private:
     double hostPpq = 0.0, freeBeats = 0.0; bool hostPpqValid = false;
     float sqLevel = 1.f, sqLevelPrev = 1.f, sqCut = 0.f, sqSync = 0.f, sqPitch = 0.f, sqPwm = 0.f, sqVowel = 0.f, sqDly = 0.f;
     bool sqActive = false;
+    float driftAmt = 1.f;
     std::atomic<int> seqStepShown { -1 };
     float lfoPhase = 0.f, lfoVal = 0.f, lfoSH = 0.f;
     int lastNote = -1;

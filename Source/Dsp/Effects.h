@@ -15,11 +15,77 @@ inline float fastTanh (float x)
 }
 
 // ---------------------------------------------------------------------------------------------
-// Distortion: Soft (tanh) / Hard (Clip) / Fold (Wellenfalter), 2-fach überabgetastet, Klangblende (Tiefpass)
+// Halbband-FIR (Kaiser-Fenster) für das Über-/Unterabtasten; Verstärkung 1 bei DC
+struct HalfBand
+{
+    std::vector<float> h;
+    void design (int taps, float beta)
+    {
+        h.assign ((size_t) taps, 0.f);
+        const int c = taps / 2;
+        auto i0 = [] (double x) { double s = 1.0, t = 1.0; for (int k = 1; k < 30; ++k) { t *= (x / (2.0 * k)) * (x / (2.0 * k)); s += t; } return s; };
+        double sum = 0.0;
+        for (int n = 0; n < taps; ++n)
+        {
+            const double x = n - c;
+            const double sinc = x == 0.0 ? 0.5 : std::sin (kPi * 0.5 * x) / (kPi * x);
+            const double r = 2.0 * n / (double) (taps - 1) - 1.0;
+            const double w = i0 (beta * std::sqrt (std::max (0.0, 1.0 - r * r))) / i0 (beta);
+            h[(size_t) n] = (float) (sinc * w);
+            sum += h[(size_t) n];
+        }
+        for (auto& v : h) v = (float) (v / sum);
+    }
+};
+
+// Zweifach-Überabtastung: ein Eingangssample -> zwei Ausgangssamples (up) bzw. zwei -> eins (down)
+struct Up2
+{
+    const HalfBand* f = nullptr; std::vector<float> z; int pos = 0;
+    void init (const HalfBand* hb) { f = hb; z.assign (f->h.size() / 2 + 2, 0.f); pos = 0; }
+    void process (float x, float& y0, float& y1)
+    {
+        const int n = (int) z.size();
+        z[(size_t) pos] = x;
+        const int taps = (int) f->h.size();
+        float a = 0.f, b = 0.f;
+        for (int j = 0, k = 0; j < taps; j += 2, ++k) a += f->h[(size_t) j] * z[(size_t) ((pos - k + n) % n)];
+        for (int j = 1, k = 0; j < taps; j += 2, ++k) b += f->h[(size_t) j] * z[(size_t) ((pos - k + n) % n)];
+        y0 = 2.f * a; y1 = 2.f * b;
+        pos = (pos + 1) % n;
+    }
+};
+struct Down2
+{
+    const HalfBand* f = nullptr; std::vector<float> z; int pos = 0;
+    void init (const HalfBand* hb) { f = hb; z.assign (f->h.size() + 2, 0.f); pos = 0; }
+    float process (float x0, float x1)   // x0 ist das ältere der beiden Samples
+    {
+        const int n = (int) z.size();
+        z[(size_t) pos] = x0; pos = (pos + 1) % n;
+        z[(size_t) pos] = x1;
+        const int taps = (int) f->h.size();
+        float a = 0.f;
+        for (int j = 0; j < taps; ++j) a += f->h[(size_t) j] * z[(size_t) ((pos - j + n) % n)];
+        pos = (pos + 1) % n;
+        return a;
+    }
+};
+
+// ---------------------------------------------------------------------------------------------
+// Distortion: Soft (tanh) / Hard (Clip) / Fold (Wellenfalter), 4-fach überabgetastet (Halbband-Filter),
+// Klangblende (Tiefpass). Das trockene Signal wird um die Filterlaufzeit verzögert, damit bei Mix < 100 % keine Kammfilter entstehen.
 class Distortion
 {
 public:
-    void prepare (float sampleRate) { sr = sampleRate; for (auto& c : ch) c = {}; }
+    static constexpr int kLatency = 26;   // Samples: (2*(47-1) + (13-1)) / 4
+
+    void prepare (float sampleRate)
+    {
+        sr = sampleRate;
+        hbA.design (47, 8.f); hbB.design (13, 6.f);
+        for (auto& c : ch) { c = {}; c.u1.init (&hbA); c.u2.init (&hbB); c.d2.init (&hbB); c.d1.init (&hbA); c.dry.assign (kLatency + 1, 0.f); c.di = 0; }
+    }
 
     // type: 0 Soft, 1 Hard, 2 Fold | drive 0..1 | tone 0..1 | mix 0..1
     void process (float& l, float& r, int type, float drive, float tone, float mix)
@@ -29,25 +95,38 @@ public:
         const float fc   = 800.f * std::pow (15.f, tone);                       // 800 Hz .. 12 kHz
         const float a    = 1.f - std::exp (-2.f * kPi * std::min (fc, sr * 0.45f) / sr);
 
-        auto run = [&] (Chan& c, float x)
+        auto run = [&] (Chan& c, float x, float& dryDelayed)
         {
-            const float mid = 0.5f * (c.prev + x);                              // Zwischenwert für 2x-Rate
-            c.prev = x;
-            const float s0 = shape (mid * pre, type);
-            const float s1 = shape (x * pre, type);
-            const float y = (0.25f * c.s1 + 0.5f * s0 + 0.25f * s1) * comp;    // einfacher Tiefpass vor dem Dezimieren
-            c.s1 = s1;
+            // trockenes Signal um kLatency Samples verzögern
+            c.dry[(size_t) c.di] = x;
+            c.di = (c.di + 1) % (kLatency + 1);
+            dryDelayed = c.dry[(size_t) c.di];
+
+            float a0, a1, b0, b1, b2, b3;
+            c.u1.process (x, a0, a1);                                            // fs -> 2 fs
+            c.u2.process (a0, b0, b1);                                           // 2 fs -> 4 fs (zwei Samples nacheinander)
+            c.u2.process (a1, b2, b3);
+            const float s0 = shape (b0 * pre, type), s1 = shape (b1 * pre, type), s2 = shape (b2 * pre, type), s3 = shape (b3 * pre, type);
+            const float d0 = c.d2.process (s0, s1);                              // 4 fs -> 2 fs
+            const float d1 = c.d2.process (s2, s3);
+            const float y = c.d1.process (d0, d1) * comp;                        // 2 fs -> fs
             c.lp += a * (y - c.lp);
             return c.lp * 0.9f;
         };
 
-        const float wl = run (ch[0], l), wr = run (ch[1], r);
-        l = l * (1.f - mix) + wl * mix;
-        r = r * (1.f - mix) + wr * mix;
+        float dl, dr;
+        const float wl = run (ch[0], l, dl), wr = run (ch[1], r, dr);
+        l = dl * (1.f - mix) + wl * mix;
+        r = dr * (1.f - mix) + wr * mix;
     }
 
 private:
-    struct Chan { float prev = 0.f, s1 = 0.f, lp = 0.f; };
+    struct Chan
+    {
+        Up2 u1, u2; Down2 d2, d1;
+        std::vector<float> dry; int di = 0;
+        float lp = 0.f;
+    };
     static float shape (float x, int type)
     {
         switch (type)
@@ -58,6 +137,7 @@ private:
         }
     }
     Chan ch[2];
+    HalfBand hbA, hbB;
     float sr = 44100.f;
 };
 
@@ -250,75 +330,93 @@ private:
 };
 
 // ---------------------------------------------------------------------------------------------
+// Reverb: 8-Kanal-Feedback-Delay-Network (Householder-Matrix) mit modulierten Verzögerungen, Eingangs-Diffusion
+// und dekorreliertem Stereo-Ausgang. SIZE = Nachhallzeit, DAMP = Höhendämpfung in der Rückkopplung.
 class Reverb
 {
 public:
     void prepare (float sampleRate)
     {
-        static const int ct[8] = { 1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617 };
-        static const int at[4] = { 556, 441, 341, 225 };
-        const float sc = sampleRate / 44100.f;
-        for (int i = 0; i < 8; ++i)
+        sr = sampleRate;
+        static const int len[kN] = { 1087, 1283, 1447, 1621, 1823, 2039, 2243, 2467 };   // teilerfremd (Primzahlen bei 44,1 kHz)
+        const float sc = sr / 44100.f * 1.3f;
+        modDepth = 5.f * sr / 44100.f;
+        for (int i = 0; i < kN; ++i)
         {
-            combL[i].init ((int) (ct[i] * sc));
-            combR[i].init ((int) ((ct[i] + 23) * sc));
+            base[i] = (float) ((int) (len[i] * sc) | 1);
+            line[i].assign ((size_t) base[i] + (size_t) modDepth * 2 + 8, 0.f);
+            lp[i] = 0.f; ph[i] = (float) i / (float) kN; rate[i] = 0.11f + 0.043f * (float) i;
         }
-        for (int i = 0; i < 4; ++i)
-        {
-            apL[i].init ((int) (at[i] * sc));
-            apR[i].init ((int) ((at[i] + 23) * sc));
-        }
+        for (auto& x : wi) x = 0;
+        static const int at[2] = { 113, 337 };
+        for (int i = 0; i < 2; ++i) { ap[i].assign ((size_t) std::max (1, (int) (at[i] * sr / 44100.f)), 0.f); api[i] = 0; }
+        cachedSize = -1.f;
     }
 
     void process (float& l, float& r, float size, float damp, float mix)
     {
-        const float fb = 0.70f + 0.28f * size;
-        const float d1 = damp * 0.4f, d2 = 1.f - d1;
-        const float in = (l + r) * 0.5f * 0.015f;
+        if (size != cachedSize)
+        {
+            cachedSize = size;
+            // Nachhallzeit (s): Stützpunkte so gewählt, dass SIZE dem bisherigen Hall entspricht (logarithmisch interpoliert)
+            static const float rx[8] = { 0.f, 0.1f, 0.3f, 0.5f, 0.8f, 0.9f, 0.95f, 1.f }, ry[8] = { 0.45f, 0.69f, 0.87f, 1.19f, 2.6f, 4.5f, 6.1f, 10.6f };
+            const float szr = std::clamp (size, 0.f, 1.f);
+            int kr = 0; while (kr < 6 && szr > rx[kr + 1]) ++kr;
+            const float rt = std::exp (std::log (ry[kr]) + (std::log (ry[kr + 1]) - std::log (ry[kr])) * (szr - rx[kr]) / (rx[kr + 1] - rx[kr]));
+            for (int i = 0; i < kN; ++i) gain[i] = std::pow (10.f, -3.f * base[i] / (sr * rt));
+            // Pegel an den bisherigen Hall angleichen (gemessen), damit vorhandene Presets gleich laut bleiben
+            static const float xs[6] = { 0.f, 0.1f, 0.3f, 0.5f, 0.8f, 1.f }, ys[6] = { 3.25f, 3.05f, 2.8f, 2.5f, 2.2f, 2.0f };
+            const float sz = std::clamp (size, 0.f, 1.f);
+            int k = 0; while (k < 4 && sz > xs[k + 1]) ++k;
+            outScale = kOutScale * (ys[k] + (ys[k + 1] - ys[k]) * (sz - xs[k]) / (xs[k + 1] - xs[k]));        }
+        const float d1 = damp * 0.55f, d2 = 1.f - d1;
 
+        // Eingang: Mono-Summe, zwei Allpass-Diffusoren
+        float in = (l + r) * 0.5f;
+        for (int i = 0; i < 2; ++i)
+        {
+            auto& b = ap[i]; const float bo = b[(size_t) api[i]];
+            const float v = in - 0.6f * bo;
+            b[(size_t) api[i]] = v;
+            in = bo + 0.6f * v;
+            if (++api[i] >= (int) b.size()) api[i] = 0;
+        }
+
+        float y[kN], sum = 0.f;
+        for (int i = 0; i < kN; ++i)
+        {
+            ph[i] += rate[i] / sr; if (ph[i] >= 1.f) ph[i] -= 1.f;
+            const float d = base[i] + modDepth * std::sin (2.f * kPi * ph[i]);
+            const int n = (int) line[i].size();
+            float rp = (float) wi[i] - d; while (rp < 0.f) rp += (float) n;
+            const int i0 = (int) rp; const float fr = rp - (float) i0;
+            const float out = line[i][(size_t) (i0 % n)] * (1.f - fr) + line[i][(size_t) ((i0 + 1) % n)] * fr;
+            lp[i] = out * d2 + lp[i] * d1;                                    // Höhendämpfung
+            y[i] = lp[i] * gain[i];
+            sum += y[i];
+        }
+        static const float sIn[kN] = { 1, -1, 1, 1, -1, 1, -1, -1 };
+        static const float sL[kN]  = { 1, 1, -1, -1, 1, -1, 1, -1 };
+        static const float sR[kN]  = { 1, -1, 1, -1, -1, 1, 1, -1 };
+        const float h = sum * (2.f / (float) kN);                              // Householder: y - 2/N * sum(y)
         float oL = 0.f, oR = 0.f;
-        for (int i = 0; i < 8; ++i)
+        for (int i = 0; i < kN; ++i)
         {
-            oL += combL[i].tick (in, fb, d1, d2);
-            oR += combR[i].tick (in, fb, d1, d2);
+            const int n = (int) line[i].size();
+            line[i][(size_t) wi[i]] = in * 0.25f * sIn[i] + (y[i] - h);
+            if (++wi[i] >= n) wi[i] = 0;
+            oL += y[i] * sL[i]; oR += y[i] * sR[i];
         }
-        for (int i = 0; i < 4; ++i)
-        {
-            oL = apL[i].tick (oL);
-            oR = apR[i].tick (oR);
-        }
-        l += oL * 3.f * mix;
-        r += oR * 3.f * mix;
+        l += oL * outScale * mix;
+        r += oR * outScale * mix;
     }
 
 private:
-    struct Comb
-    {
-        std::vector<float> b; int i = 0; float store = 0.f;
-        void init (int n) { b.assign ((size_t) std::max (n, 1), 0.f); i = 0; store = 0.f; }
-        float tick (float in, float fb, float d1, float d2)
-        {
-            const float out = b[(size_t) i];
-            store = out * d2 + store * d1;
-            b[(size_t) i] = in + store * fb;
-            if (++i >= (int) b.size()) i = 0;
-            return out;
-        }
-    };
-    struct Allpass
-    {
-        std::vector<float> b; int i = 0;
-        void init (int n) { b.assign ((size_t) std::max (n, 1), 0.f); i = 0; }
-        float tick (float in)
-        {
-            const float bo = b[(size_t) i];
-            const float out = -in + bo;
-            b[(size_t) i] = in + bo * 0.5f;
-            if (++i >= (int) b.size()) i = 0;
-            return out;
-        }
-    };
-    Comb combL[8], combR[8];
-    Allpass apL[4], apR[4];
+    static constexpr int kN = 8;
+    static constexpr float kOutScale = 0.55f;
+    std::vector<float> line[kN], ap[2];
+    float base[kN] = {}, lp[kN] = {}, ph[kN] = {}, rate[kN] = {}, gain[kN] = {};
+    int api[2] = { 0, 0 }, wi[kN] = {};
+    float sr = 44100.f, modDepth = 5.f, cachedSize = -1.f, outScale = 0.55f;
 };
 } // namespace cs

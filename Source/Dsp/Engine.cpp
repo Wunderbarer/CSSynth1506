@@ -74,6 +74,7 @@ inline float svfBand (Svf& s, const SvfCoef& c, float x)
 }
 
 // ---- Sample-Oszillator (Layer V) ----
+constexpr double kLoopXfade = 0.0015;   // Loop-Überblendung in Sekunden
 // 4-Punkt-Hermite-Interpolation an der (gebrochenen) Position pos
 inline float sampleAt (const std::vector<float>& d, double pos)
 {
@@ -171,6 +172,7 @@ void Engine::noteOn (int note, float velocity)
             lv.ph = (noise() * 0.5f + 0.5f);
             lv.subPh = 0.f; lv.sph = 0.f; lv.dStep = 0.f;
             lv.fe = {}; lv.ae = {};
+            lv.dr1 = noise() * 0.02f; lv.dr2 = noise() * 0.02f;
         }
         if (L == SAMPLE_LAYER)   // Sample startet bei jedem Anschlag neu an der Startposition
         {
@@ -325,9 +327,9 @@ void Engine::renderChunk (float* oL, float* oR, int n)
         formPos += (target - formPos) * 0.35f;
     }
 
-    float mono[kChunk] = {};
+    float monoL[kChunk] = {}, monoR[kChunk] = {};
     for (auto& v : voices)
-        if (v.active) renderVoice (v, mono, n);
+        if (v.active) renderVoice (v, monoL, monoR, n);
 
     // --- Effekte und Master ---
     const int dsType = (int) std::lround (P[GP_DS_TYPE]);
@@ -352,7 +354,7 @@ void Engine::renderChunk (float* oL, float* oR, int n)
 
     for (int k = 0; k < n; ++k)
     {
-        float l = mono[k], r = mono[k];
+        float l = monoL[k], r = monoR[k];
         if (dsMix > 0.001f) dist.process (l, r, dsType, dsDrive, dsTone, dsMix);
         if (phMix > 0.001f) phaser.process (l, r, phRate, phDepth, phFb, phMix);
         if (flMix > 0.001f) flanger.process (l, r, flRate, flDepth, flFb, flMix);
@@ -374,8 +376,13 @@ void Engine::renderChunk (float* oL, float* oR, int n)
     }
 }
 
-void Engine::renderVoice (Voice& v, float* mono, int n)
+void Engine::renderVoice (Voice& v, float* monoL, float* monoR, int n)
 {
+    // Feste Stereoverteilung (ohne Regler): Layer I bleibt in der Mitte, die übrigen Layer sitzen leicht links/rechts,
+    // dazu eine kleine tonhöhenabhängige Streuung. Tiefe Töne (unter C2) bleiben mono, nach oben öffnet sich das Bild.
+    static const float kLayerPan[NUM_LAYERS] = { 0.f, 0.30f, -0.30f, 0.18f, -0.18f };
+    const float width = std::clamp (((float) v.note - 36.f) / 24.f, 0.f, 1.f);
+    const float noteSpread = ((float) ((v.note * 7) % 12) - 5.5f) / 5.5f * 0.12f;
     // Portamento
     v.cur = glideCoef >= 1.f ? v.tgt : v.cur + (v.tgt - v.cur) * glideCoef;
 
@@ -395,6 +402,13 @@ void Engine::renderVoice (Voice& v, float* mono, int n)
         const bool formant = (L == FORMANT_LAYER);
         const bool sampler = (L == SAMPLE_LAYER);
         const int o = L * LP_COUNT;
+        const float pan = std::clamp ((kLayerPan[L] + noteSpread) * width, -1.f, 1.f);
+        const float gL = std::cos (std::max (pan, 0.f) * 0.5f * kPi), gR = std::cos (std::max (-pan, 0.f) * 0.5f * kPi);
+        // analoge Drift: zwei langsame Zufallswerte pro Layer (ca. +-2 Cent bzw. +-3 % Filterfrequenz)
+        lv.dr1 += 0.0005f * (noise() - lv.dr1);
+        lv.dr2 += 0.0005f * (noise() - lv.dr2);
+        const bool syncedLoop = sampler && P[GP_SMP_SYNC] > 0.5f;
+        const float driftSemis = syncedLoop ? 0.f : lv.dr1 * 2.5f * driftAmt;
         const int wave = (int) std::lround (P[o + LP_WAVE]);
         const int oct = (int) std::lround (P[o + LP_OCT]) - 2;
         const float level = P[o + LP_LEVEL] * 0.22f * velGain;
@@ -402,7 +416,7 @@ void Engine::renderVoice (Voice& v, float* mono, int n)
         const float noiseAmt = P[o + LP_NOISE] * 0.6f;
 
         // Tonhöhe
-        const float semis = v.cur + (float) oct * 12.f + P[o + LP_DETUNE] * 0.01f + bendSemis + vibSemis + sqPitch;
+        const float semis = v.cur + (float) oct * 12.f + P[o + LP_DETUNE] * 0.01f + bendSemis + vibSemis + sqPitch + driftSemis;
         const float freq = 440.f * std::exp2 ((semis - 69.f) / 12.f);
         const float dt = std::min (freq / sr, 0.45f);
         const float sdt = dt * 0.5f;
@@ -443,7 +457,7 @@ void Engine::renderVoice (Voice& v, float* mono, int n)
                            + P[GP_LFO_CUT] * lfoVal * 2.f
                            + P[GP_AT_FILTER] * atS * 3.f
                            + P[GP_VEL_FLT] * (v.vel - 0.7f) * 3.f
-                           + sqCut;
+                           + sqCut + lv.dr2 * 4.f * driftAmt;
 
         const float lpFc = std::clamp (lpS[L] * std::exp2 (modOct), 20.f, sr * 0.45f);
         const float q = 1.f - resS[L];
@@ -520,6 +534,17 @@ void Engine::renderVoice (Voice& v, float* mono, int n)
                 if (haveSample && ! lv.done)
                 {
                     osc = sampleAt (smp->data, lv.sp);
+                    if (wave == 0)          // Loop: kurze Überblendung am Loop-Ende (verhindert Knacken bei nicht perfekt geschnittenen Loops)
+                    {
+                        const double xf = std::min (kLoopXfade * (double) smp->rate, (sLe - sLs) * 0.25);
+                        if (xf > 1.0 && lv.sp > sLe - xf)
+                        {
+                            const double wgt = (lv.sp - (sLe - xf)) / xf;
+                            osc = (float) ((1.0 - wgt) * osc + wgt * sampleAt (smp->data, lv.sp - (sLe - sLs)));
+                        }
+                    }
+                    else if (wave == 1)     // One-Shot: kurzes Ausblenden der letzten Samples, damit das Ende nicht knackt
+                        osc *= (float) std::min (1.0, (sLen - 1.0 - lv.sp) / 48.0);
                     if (wave == 1)          // One-Shot: einmal bis zum Ende
                     {
                         lv.sp += sStep;
@@ -594,7 +619,9 @@ void Engine::renderVoice (Voice& v, float* mono, int n)
 
             lv.fe.tick (fcfg[L]);
             const float a = lv.ae.tick (acfg[L]);
-            mono[s] += y * a * level * (sqLevelPrev + (sqLevel - sqLevelPrev) * ((float) (s + 1) / (float) n));
+            const float o2 = y * a * level * (sqLevelPrev + (sqLevel - sqLevelPrev) * ((float) (s + 1) / (float) n));
+            monoL[s] += o2 * gL;
+            monoR[s] += o2 * gR;
         }
     }
 
